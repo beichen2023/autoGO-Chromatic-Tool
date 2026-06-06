@@ -1153,6 +1153,48 @@ func TestRunImageFindTestNotFound(t *testing.T) {
 	}
 }
 
+func TestFindImageTemplateMatchesFindsBestAndAllMatches(t *testing.T) {
+	target := image.NewNRGBA(image.Rect(0, 0, 10, 5))
+	template := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	colors := []color.NRGBA{
+		{R: 10, G: 20, B: 30, A: 255},
+		{R: 40, G: 50, B: 60, A: 255},
+		{R: 70, G: 80, B: 90, A: 255},
+		{R: 100, G: 110, B: 120, A: 255},
+	}
+	for i, c := range colors {
+		template.SetNRGBA(i%2, i/2, c)
+		target.SetNRGBA(1+i%2, 1+i/2, c)
+		target.SetNRGBA(6+i%2, 2+i/2, c)
+	}
+
+	best := findImageTemplateMatches(target, template, target.Bounds(), false, false, 1, false)
+	if len(best) != 1 || best[0].Point != image.Pt(1, 1) {
+		t.Fatalf("best image match mismatch: %+v", best)
+	}
+
+	all := findImageTemplateMatches(target, template, target.Bounds(), false, false, 1, true)
+	if len(all) != 2 || all[0].Point != image.Pt(1, 1) || all[1].Point != image.Pt(6, 2) {
+		t.Fatalf("all image matches mismatch: %+v", all)
+	}
+}
+
+func TestFindImageTemplateMatchesSupportsGrayAndTransparent(t *testing.T) {
+	target := image.NewNRGBA(image.Rect(0, 0, 5, 3))
+	template := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	transparent := color.NRGBA{R: 255, G: 0, B: 255, A: 255}
+	template.SetNRGBA(0, 0, transparent)
+	template.SetNRGBA(1, 0, transparent)
+	template.SetNRGBA(0, 1, transparent)
+	template.SetNRGBA(1, 1, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+	target.SetNRGBA(3, 2, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+
+	matches := findImageTemplateMatches(target, template, target.Bounds(), true, true, 1, false)
+	if len(matches) != 1 || matches[0].Point != image.Pt(2, 1) {
+		t.Fatalf("transparent gray image match mismatch: %+v", matches)
+	}
+}
+
 func TestRunImageFindTestResultFindMultiColorsAll(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},

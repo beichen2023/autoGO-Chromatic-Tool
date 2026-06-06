@@ -3390,6 +3390,122 @@ type testColorInfo struct {
 	c3   color.NRGBA
 }
 
+type imageTemplateMatch struct {
+	Point      image.Point
+	Similarity float32
+}
+
+func clampImageSimilarity(sim float32) float32 {
+	if sim < 0.1 {
+		return 0.1
+	}
+	if sim > 1 {
+		return 1
+	}
+	return sim
+}
+
+func grayValue(c color.NRGBA) int {
+	return (299*int(c.R) + 587*int(c.G) + 114*int(c.B)) / 1000
+}
+
+func imageTemplateSimilarity(img, template image.Image, offset image.Point, isGray, isTransparent bool, minSimilarity float32) (float32, bool) {
+	templateBounds := template.Bounds()
+	transparentColor := color.NRGBAModel.Convert(template.At(templateBounds.Min.X, templateBounds.Min.Y)).(color.NRGBA)
+	channelCount := 3
+	if isGray {
+		channelCount = 1
+	}
+
+	maxAverageDiff := float64(1-clampImageSimilarity(minSimilarity)) * 255
+	diffTotal := 0
+	comparedChannels := 0
+	for y := templateBounds.Min.Y; y < templateBounds.Max.Y; y++ {
+		for x := templateBounds.Min.X; x < templateBounds.Max.X; x++ {
+			templateColor := color.NRGBAModel.Convert(template.At(x, y)).(color.NRGBA)
+			if isTransparent && templateColor.R == transparentColor.R && templateColor.G == transparentColor.G && templateColor.B == transparentColor.B {
+				continue
+			}
+			targetColor := imagePixelNRGBA(img, offset.X+x-templateBounds.Min.X, offset.Y+y-templateBounds.Min.Y)
+			if isGray {
+				diffTotal += abs(grayValue(targetColor) - grayValue(templateColor))
+			} else {
+				diffTotal += int(absDiffUint8(targetColor.R, templateColor.R))
+				diffTotal += int(absDiffUint8(targetColor.G, templateColor.G))
+				diffTotal += int(absDiffUint8(targetColor.B, templateColor.B))
+			}
+			comparedChannels += channelCount
+			if comparedChannels > 0 && float64(diffTotal)/float64(comparedChannels) > maxAverageDiff {
+				return 0, false
+			}
+		}
+	}
+	if comparedChannels == 0 {
+		return 0, false
+	}
+
+	similarity := float32(1 - float64(diffTotal)/float64(comparedChannels*255))
+	return similarity, similarity >= clampImageSimilarity(minSimilarity)
+}
+
+func imageMatchRectsOverlap(a, b image.Rectangle) bool {
+	return !a.Intersect(b).Empty()
+}
+
+func findImageTemplateMatches(img, template image.Image, searchRect image.Rectangle, isGray, isTransparent bool, sim float32, findAll bool) []imageTemplateMatch {
+	if img == nil || template == nil {
+		return nil
+	}
+
+	targetBounds := image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())
+	searchRect = searchRect.Intersect(targetBounds)
+	templateWidth := template.Bounds().Dx()
+	templateHeight := template.Bounds().Dy()
+	if searchRect.Empty() || templateWidth <= 0 || templateHeight <= 0 || templateWidth > searchRect.Dx() || templateHeight > searchRect.Dy() {
+		return nil
+	}
+
+	sim = clampImageSimilarity(sim)
+	candidates := make([]imageTemplateMatch, 0)
+	for y := searchRect.Min.Y; y <= searchRect.Max.Y-templateHeight; y++ {
+		for x := searchRect.Min.X; x <= searchRect.Max.X-templateWidth; x++ {
+			matchSimilarity, matched := imageTemplateSimilarity(img, template, image.Pt(x, y), isGray, isTransparent, sim)
+			if matched {
+				candidates = append(candidates, imageTemplateMatch{Point: image.Pt(x, y), Similarity: matchSimilarity})
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].Similarity > candidates[j].Similarity
+	})
+	if !findAll {
+		return candidates[:1]
+	}
+
+	results := make([]imageTemplateMatch, 0, len(candidates))
+	resultRects := make([]image.Rectangle, 0, len(candidates))
+	for _, candidate := range candidates {
+		rect := image.Rect(candidate.Point.X, candidate.Point.Y, candidate.Point.X+templateWidth, candidate.Point.Y+templateHeight)
+		overlapped := false
+		for _, acceptedRect := range resultRects {
+			if imageMatchRectsOverlap(rect, acceptedRect) {
+				overlapped = true
+				break
+			}
+		}
+		if overlapped {
+			continue
+		}
+		results = append(results, candidate)
+		resultRects = append(resultRects, rect)
+	}
+	return results
+}
+
 func sanitizeTestColorText(text string) string {
 	replacer := strings.NewReplacer("[", "", "]", "", "#", "", " ", "", `"`, "")
 	return replacer.Replace(text)
@@ -4425,6 +4541,176 @@ func showCodeTestDialog(parent fyne.Window, selectedFunction, precisionText, dir
 	codeDialog.Show()
 }
 
+func decodeImageFile(path string) (image.Image, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return png.Decode(bytes.NewReader(data))
+	case ".jpg", ".jpeg":
+		return jpeg.Decode(bytes.NewReader(data))
+	case ".bmp":
+		return bmp.Decode(bytes.NewReader(data))
+	default:
+		img, _, decodeErr := image.Decode(bytes.NewReader(data))
+		return img, decodeErr
+	}
+}
+
+func parseImageSearchRect(text string, img image.Image) (image.Rectangle, error) {
+	if img == nil {
+		return image.Rectangle{}, fmt.Errorf("当前目标图片不可用")
+	}
+	parts := strings.Split(strings.TrimSpace(text), ",")
+	if len(parts) != 4 {
+		return image.Rectangle{}, fmt.Errorf("查找范围需要填写 x1,y1,x2,y2")
+	}
+	values := [4]int{}
+	for i, part := range parts {
+		value, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return image.Rectangle{}, fmt.Errorf("查找范围包含无效整数")
+		}
+		values[i] = value
+	}
+	x1, y1, x2, y2, ok := imageSearchBounds(img, values[0], values[1], values[2], values[3])
+	if !ok {
+		return image.Rectangle{}, fmt.Errorf("查找范围超出目标图片或范围无效")
+	}
+	return image.Rect(x1, y1, x2, y2), nil
+}
+
+func formatImageTemplateMatches(matches []imageTemplateMatch) string {
+	if len(matches) == 0 {
+		return "未找到匹配图片：(-1, -1)"
+	}
+	lines := make([]string, 0, len(matches))
+	for i, match := range matches {
+		lines = append(lines, fmt.Sprintf("%d. (%d, %d) 相似度 %.4f", i+1, match.Point.X, match.Point.Y, match.Similarity))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func showFindImageTestDialog(parent fyne.Window, targetViewer *ImageViewer, tabs *container.DocTabs, precisionText string) {
+	if targetViewer == nil || targetViewer.image == nil {
+		dialog.ShowInformation("找图测试", "请先打开要执行找图测试的截图或图片标签页", parent)
+		return
+	}
+
+	templateImages := make(map[string]image.Image)
+	templateOptions := make([]string, 0)
+	if tabs != nil {
+		for i, tab := range tabs.Items {
+			tabData := tabDataMap[tab]
+			if tabData == nil || tabData.nodeToolOnly || tabData.imageViewer == nil || tabData.imageViewer.image == nil {
+				continue
+			}
+			option := fmt.Sprintf("标签页 %d：%s", i+1, tab.Text)
+			templateOptions = append(templateOptions, option)
+			templateImages[option] = tabData.imageViewer.image
+		}
+	}
+
+	var templateImage image.Image
+	templateSourceLabel := widget.NewLabel("尚未选择模板图片")
+	templateSourceLabel.Wrapping = fyne.TextWrapWord
+	templateSelect := widget.NewSelect(templateOptions, func(selected string) {
+		templateImage = templateImages[selected]
+		if templateImage != nil {
+			templateSourceLabel.SetText(fmt.Sprintf("%s（%dx%d）", selected, templateImage.Bounds().Dx(), templateImage.Bounds().Dy()))
+		}
+	})
+	templateSelect.PlaceHolder = "选择图片标签页作为模板"
+
+	localTemplateBtn := widget.NewButtonWithIcon("选择本地图片", theme.FolderOpenIcon(), func() {
+		go func() {
+			path, err := nativedialog.File().
+				Filter("图片文件", "png", "jpg", "jpeg", "bmp").
+				Title("选择找图模板").
+				Load()
+			if err != nil {
+				return
+			}
+			img, err := decodeImageFile(path)
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("加载模板图片失败: %v", err), parent)
+					return
+				}
+				templateImage = convertToNRGBA(img)
+				templateSelect.ClearSelected()
+				templateSourceLabel.SetText(fmt.Sprintf("本地图片：%s（%dx%d）", path, templateImage.Bounds().Dx(), templateImage.Bounds().Dy()))
+			})
+		}()
+	})
+
+	modeSelect := widget.NewSelect([]string{"FindImage", "FindImageAll"}, nil)
+	modeSelect.SetSelected("FindImage")
+	similarityEntry := widget.NewEntry()
+	similarityEntry.SetText(strings.TrimSpace(precisionText))
+	searchRangeEntry := widget.NewEntry()
+	searchRangeEntry.SetText(defaultRangeText)
+	grayCheck := widget.NewCheck("灰度匹配", nil)
+	transparentCheck := widget.NewCheck("左上角颜色作为透明色", nil)
+	resultEntry := widget.NewMultiLineEntry()
+	resultEntry.SetMinRowsVisible(7)
+	resultEntry.SetPlaceHolder("找图测试结果将显示在这里...")
+
+	var findDialog *dialog.CustomDialog
+	closeDialog := func() {
+		if findDialog != nil {
+			findDialog.Hide()
+		}
+	}
+	testBtn := widget.NewButtonWithIcon("开始找图", theme.MediaPlayIcon(), func() {
+		if templateImage == nil {
+			dialog.ShowInformation("找图测试", "请先选择本地模板图片或图片标签页", parent)
+			return
+		}
+		searchRect, err := parseImageSearchRect(searchRangeEntry.Text, targetViewer.image)
+		if err != nil {
+			dialog.ShowError(err, parent)
+			return
+		}
+		similarity, err := strconv.ParseFloat(strings.TrimSpace(similarityEntry.Text), 32)
+		if err != nil || similarity < 0.1 || similarity > 1 {
+			dialog.ShowError(fmt.Errorf("相似度需要填写 0.1 到 1.0 之间的数字"), parent)
+			return
+		}
+
+		findAll := modeSelect.Selected == "FindImageAll"
+		matches := findImageTemplateMatches(targetViewer.image, templateImage, searchRect, grayCheck.Checked, transparentCheck.Checked, float32(similarity), findAll)
+		resultEntry.SetText(formatImageTemplateMatches(matches))
+		targetViewer.SetFindImageTestHighlights(matches, image.Pt(templateImage.Bounds().Dx(), templateImage.Bounds().Dy()))
+	})
+	testBtn.Importance = widget.HighImportance
+
+	content := container.NewBorder(
+		nil,
+		container.NewHBox(layout.NewSpacer(), widget.NewButton("关闭", closeDialog), testBtn),
+		nil,
+		nil,
+		container.NewVBox(
+			widget.NewLabel("目标图片：当前图片标签页"),
+			container.NewBorder(nil, nil, widget.NewLabel("模板标签"), localTemplateBtn, templateSelect),
+			templateSourceLabel,
+			container.NewGridWithColumns(2,
+				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, modeSelect),
+				container.NewBorder(nil, nil, widget.NewLabel("相似度"), nil, similarityEntry),
+			),
+			container.NewBorder(nil, nil, widget.NewLabel("查找范围"), nil, searchRangeEntry),
+			container.NewGridWithColumns(2, grayCheck, transparentCheck),
+			widget.NewLabel("范围中 x2 或 y2 为 0 时使用目标图片最大宽度或高度。"),
+			resultEntry,
+		),
+	)
+	findDialog = dialog.NewCustomWithoutButtons("找图测试", content, parent)
+	findDialog.Resize(fyne.NewSize(680, 500))
+	findDialog.Show()
+}
+
 func refreshImagesAPIFields() {
 	if updateImagesAPIFields != nil {
 		updateImagesAPIFields()
@@ -4713,6 +4999,27 @@ func (v *ImageViewer) SetFindTestHighlights(points []image.Point) {
 	if v.image != nil {
 		v.Refresh()
 	}
+}
+
+func (v *ImageViewer) SetFindImageTestHighlights(matches []imageTemplateMatch, templateSize image.Point) {
+	if v.nodeToolOnly || v.image == nil {
+		return
+	}
+	v.findTestRects = v.findTestRects[:0]
+	for _, match := range matches {
+		rect := image.Rect(match.Point.X, match.Point.Y, match.Point.X+templateSize.X, match.Point.Y+templateSize.Y).Intersect(v.image.Bounds())
+		if rect.Empty() {
+			continue
+		}
+		v.findTestRects = append(v.findTestRects, MarkRect{
+			X1:    rect.Min.X,
+			Y1:    rect.Min.Y,
+			X2:    rect.Max.X,
+			Y2:    rect.Max.Y,
+			Color: findTestMarkColor,
+		})
+	}
+	v.Refresh()
 }
 
 func (v *ImageViewer) SetNodeFindTestHighlights(rects []image.Rectangle) {
@@ -8095,11 +8402,6 @@ func main() {
 	}
 
 	// 左侧工具栏布局：模拟 AutoGo 工具面板的窄栏按钮布局
-	makeButton := func(text string) *widget.Button {
-		btn := widget.NewButton(text, func() {})
-		btn.Importance = widget.MediumImportance
-		return btn
-	}
 	makeEntry := func(text string) *widget.Entry {
 		entry := widget.NewEntry()
 		entry.SetText(text)
@@ -8699,6 +9001,10 @@ func main() {
 	}
 	registerCommand(commandCodeTest, openCodeTest)
 	codeTestBtn := widget.NewButton("代码测试", openCodeTest)
+	openFindImageTest := func() {
+		showFindImageTestDialog(w, imageViewer, tabs, precisionEntry.Text)
+	}
+	findImageTestBtn := widget.NewButton("找图测试", openFindImageTest)
 	copyColor := func() {
 		w.Clipboard().SetContent(colorEntry.Text)
 	}
@@ -8750,7 +9056,7 @@ func main() {
 		compactBottomButton(copyCodeBtn),
 		compactBottomButton(findTestBtn),
 		compactBottomButton(codeTestBtn),
-		compactBottomButton(makeButton("找图测试")),
+		compactBottomButton(findImageTestBtn),
 	)
 
 	toolForm := container.NewVBox(
