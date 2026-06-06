@@ -39,7 +39,12 @@ go test -tags ci ./...
 
 ## 打包 Windows EXE
 
-项目根目录提供了 `build-windows.ps1`。脚本会：
+项目根目录提供了两个 Windows 打包入口：
+
+- `build-windows.bat`：适合 CMD 或直接双击。
+- `build-windows.ps1`：PowerShell 主脚本，BAT 会调用它。
+
+脚本会：
 
 1. 查找 Scoop、MSYS2 或系统 `PATH` 中的 GCC。
 2. 自动安装缺失的 `rsrc` 工具。
@@ -48,6 +53,12 @@ go test -tags ci ./...
 5. 输出 64 位 Windows EXE。
 
 执行：
+
+```bat
+build-windows.bat
+```
+
+或使用 PowerShell：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-windows.ps1

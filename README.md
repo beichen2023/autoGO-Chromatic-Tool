@@ -47,6 +47,12 @@ go run .
 
 ## 编译
 
+Windows CMD / 双击脚本：
+
+```bat
+build-windows.bat
+```
+
 Windows PowerShell：
 
 ```powershell
