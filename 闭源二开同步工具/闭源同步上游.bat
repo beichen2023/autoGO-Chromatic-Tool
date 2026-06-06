@@ -12,7 +12,7 @@ if errorlevel 1 (
 
 set "COMMAND=%~1"
 
-if "%COMMAND%"=="" goto help
+if "%COMMAND%"=="" goto menu
 if /I "%COMMAND%"=="help" goto help
 if /I "%COMMAND%"=="setup" goto setup
 if /I "%COMMAND%"=="sync" goto sync
@@ -21,10 +21,48 @@ echo [ERROR] Unknown command: %COMMAND%
 echo.
 goto help
 
+:menu
+echo Upstream sync tool
+echo.
+echo Target repo root: %REPO_ROOT%
+echo.
+echo Select an action:
+echo   1. Setup or update upstream
+echo   2. Sync upstream into local branch
+echo   3. Show help
+echo   4. Exit
+echo.
+choice /C 1234 /N /M "Choose 1-4: "
+if errorlevel 4 exit /b 0
+if errorlevel 3 goto help_pause
+if errorlevel 2 goto sync_interactive
+if errorlevel 1 goto setup_interactive
+
+:setup_interactive
+set "INTERACTIVE_SETUP=1"
+call :setup
+set "RESULT=%errorlevel%"
+echo.
+pause
+exit /b %RESULT%
+
+:sync_interactive
+set "INTERACTIVE_SYNC=1"
+call :sync
+set "RESULT=%errorlevel%"
+echo.
+pause
+exit /b %RESULT%
+
 :setup
 call :ensure_git_repo || exit /b 1
 
 set "UPSTREAM_URL=%~2"
+if "%UPSTREAM_URL%"=="" if "%INTERACTIVE_SETUP%"=="1" (
+    echo [INFO] Enter original upstream repo URL.
+    echo Example: https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git
+    set /p "UPSTREAM_URL=Upstream URL: "
+)
 if "%UPSTREAM_URL%"=="" (
     echo [ERROR] Upstream repo URL is required.
     echo Example: this-script.bat setup https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git
@@ -61,6 +99,15 @@ call :ensure_clean_worktree || exit /b 1
 set "UPSTREAM_BRANCH=%~2"
 set "LOCAL_BRANCH=%~3"
 set "SYNC_MODE=%~4"
+
+if "%INTERACTIVE_SYNC%"=="1" (
+    echo [INFO] Enter upstream branch. Leave empty to auto-detect master/main.
+    set /p "UPSTREAM_BRANCH=Upstream branch: "
+    echo [INFO] Enter local branch. Leave empty to use current branch.
+    set /p "LOCAL_BRANCH=Local branch: "
+    echo [INFO] Enter sync mode. Leave empty to use merge.
+    set /p "SYNC_MODE=Sync mode merge/rebase: "
+)
 
 if "%SYNC_MODE%"=="" set "SYNC_MODE=merge"
 
@@ -229,4 +276,10 @@ echo   setup adds or updates upstream and disables upstream push URL.
 echo   sync uses merge by default, then pushes local branch to origin.
 echo   If local branch is omitted, current branch is used.
 echo   The parent folder of this tool folder is used as the repo root.
+exit /b 0
+
+:help_pause
+call :help
+echo.
+pause
 exit /b 0
