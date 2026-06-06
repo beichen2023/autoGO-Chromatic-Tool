@@ -2,6 +2,14 @@
 chcp 65001 >nul
 setlocal
 
+set "SCRIPT_DIR=%~dp0"
+for %%i in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fi"
+pushd "%REPO_ROOT%" >nul 2>nul
+if errorlevel 1 (
+    echo [错误] 无法进入目标仓库目录：%REPO_ROOT%
+    exit /b 1
+)
+
 set "COMMAND=%~1"
 if "%COMMAND%"=="" goto help
 if /I "%COMMAND%"=="help" goto help
@@ -159,6 +167,7 @@ echo 说明：
 echo   status  查询 origin 指向的 GitHub 仓库当前可见性。
 echo   private 调用 GitHub API，把 origin 指向的仓库改成 Private。
 echo   这个脚本不会影响 upstream 原作者仓库。
+echo   脚本会把所在工具目录的上一级当作 Git 仓库根目录。
 echo.
 echo Token 权限建议：
 echo   Classic token：repo 权限

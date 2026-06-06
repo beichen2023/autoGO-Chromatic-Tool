@@ -2,6 +2,14 @@
 chcp 65001 >nul
 setlocal
 
+set "SCRIPT_DIR=%~dp0"
+for %%i in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fi"
+pushd "%REPO_ROOT%" >nul 2>nul
+if errorlevel 1 (
+    echo [错误] 无法进入目标仓库目录：%REPO_ROOT%
+    exit /b 1
+)
+
 set "COMMAND=%~1"
 
 if "%COMMAND%"=="" goto help
@@ -220,4 +228,5 @@ echo 说明：
 echo   setup 会添加或更新 upstream，并禁用 upstream 的 push 地址。
 echo   sync 默认使用 merge，把 upstream/上游分支 同步到本地分支并推送 origin。
 echo   不传本地分支时，默认使用当前分支。
+echo   脚本会把所在工具目录的上一级当作 Git 仓库根目录。
 exit /b 0
