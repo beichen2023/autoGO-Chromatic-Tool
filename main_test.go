@@ -84,6 +84,16 @@ func TestNormalizeUserConfigDefaultsThemeScheme(t *testing.T) {
 	if config.ThemeScheme != appThemeSchemeClassicBlue {
 		t.Fatalf("theme scheme mismatch: want %q got %q", appThemeSchemeClassicBlue, config.ThemeScheme)
 	}
+	if config.ImageDisplayMode != imageDisplayModeOriginal {
+		t.Fatalf("image display mode mismatch: want %q got %q", imageDisplayModeOriginal, config.ImageDisplayMode)
+	}
+}
+
+func TestNormalizeUserConfigKeepsFitViewImageDisplayMode(t *testing.T) {
+	config := normalizeUserConfig(UserConfig{ImageDisplayMode: imageDisplayModeFitView})
+	if config.ImageDisplayMode != imageDisplayModeFitView {
+		t.Fatalf("image display mode mismatch: want %q got %q", imageDisplayModeFitView, config.ImageDisplayMode)
+	}
 }
 
 func TestNormalizeSaveImagePaths(t *testing.T) {

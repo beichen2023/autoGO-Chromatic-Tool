@@ -52,22 +52,23 @@ type TabData struct {
 }
 
 type UserConfig struct {
-	Precision     string `json:"precision"`
-	UniformOffset string `json:"uniform_offset"`
-	PickCount     string `json:"pick_count"`
-	PickMode      string `json:"pick_mode"`
-	FunctionMode  string `json:"function_mode"`
-	DirectionMode string `json:"direction_mode"`
-	LogEnabled    bool   `json:"log_enabled"`
-	ThemeMode     string `json:"theme_mode"`
-	ThemeScheme   string `json:"theme_scheme"`
-	ShowMagnifier bool   `json:"show_magnifier"`
-	AutoCopyRange bool   `json:"auto_copy_range"`
-	ApplyRange    bool   `json:"apply_range"`
-	GridMode      bool   `json:"grid_mode"`
-	GridCols      int    `json:"grid_cols"`
-	GridRows      int    `json:"grid_rows"`
-	GridSpacing   int    `json:"grid_spacing"`
+	Precision        string `json:"precision"`
+	UniformOffset    string `json:"uniform_offset"`
+	PickCount        string `json:"pick_count"`
+	PickMode         string `json:"pick_mode"`
+	FunctionMode     string `json:"function_mode"`
+	DirectionMode    string `json:"direction_mode"`
+	LogEnabled       bool   `json:"log_enabled"`
+	ThemeMode        string `json:"theme_mode"`
+	ThemeScheme      string `json:"theme_scheme"`
+	ShowMagnifier    bool   `json:"show_magnifier"`
+	AutoCopyRange    bool   `json:"auto_copy_range"`
+	ApplyRange       bool   `json:"apply_range"`
+	ImageDisplayMode string `json:"image_display_mode"`
+	GridMode         bool   `json:"grid_mode"`
+	GridCols         int    `json:"grid_cols"`
+	GridRows         int    `json:"grid_rows"`
+	GridSpacing      int    `json:"grid_spacing"`
 
 	RightPanelSplitOffset float64                   `json:"right_panel_split_offset"`
 	SaveImagePaths        []string                  `json:"save_image_paths"`
@@ -135,6 +136,9 @@ var (
 	// 放大镜显示状态
 	magnifierEnabled = true
 
+	// 新打开普通图片页时默认使用的显示比例
+	imageDisplayModeValue = imageDisplayModeOriginal
+
 	// 代码显示框
 	codeDisplayEntry *widget.Entry
 
@@ -163,6 +167,11 @@ const (
 	appThemeModeSystem = "system"
 	appThemeModeLight  = "light"
 	appThemeModeDark   = "dark"
+)
+
+const (
+	imageDisplayModeOriginal = "original"
+	imageDisplayModeFitView  = "fit_view"
 )
 
 const (
@@ -578,6 +587,15 @@ func normalizeThemeMode(mode string) string {
 		return appThemeModeDark
 	default:
 		return appThemeModeSystem
+	}
+}
+
+func normalizeImageDisplayMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case imageDisplayModeFitView, "fit", "适配视图":
+		return imageDisplayModeFitView
+	default:
+		return imageDisplayModeOriginal
 	}
 }
 
@@ -1464,22 +1482,23 @@ var linkedColorPointFlashSeq uint64
 
 func defaultUserConfig() UserConfig {
 	return UserConfig{
-		Precision:     "0.90",
-		UniformOffset: "202020",
-		PickCount:     "20个",
-		PickMode:      "轮廓取点",
-		FunctionMode:  "findMultiColor",
-		DirectionMode: "0: 从左到右，从上到下",
-		LogEnabled:    false,
-		ThemeMode:     appThemeModeSystem,
-		ThemeScheme:   appThemeSchemeClassicBlue,
-		ShowMagnifier: true,
-		AutoCopyRange: true,
-		ApplyRange:    false,
-		GridMode:      false,
-		GridCols:      4,
-		GridRows:      4,
-		GridSpacing:   7,
+		Precision:        "0.90",
+		UniformOffset:    "202020",
+		PickCount:        "20个",
+		PickMode:         "轮廓取点",
+		FunctionMode:     "findMultiColor",
+		DirectionMode:    "0: 从左到右，从上到下",
+		LogEnabled:       false,
+		ThemeMode:        appThemeModeSystem,
+		ThemeScheme:      appThemeSchemeClassicBlue,
+		ShowMagnifier:    true,
+		AutoCopyRange:    true,
+		ApplyRange:       false,
+		ImageDisplayMode: imageDisplayModeOriginal,
+		GridMode:         false,
+		GridCols:         4,
+		GridRows:         4,
+		GridSpacing:      7,
 
 		FormatTemplates: defaultAPIFormatTemplates(),
 		Shortcuts:       normalizeShortcutConfig(nil),
@@ -1525,6 +1544,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 		config.DirectionMode = defaults.DirectionMode
 	}
 	config.ThemeMode = normalizeThemeMode(config.ThemeMode)
+	config.ImageDisplayMode = normalizeImageDisplayMode(config.ImageDisplayMode)
 	config.CustomThemeSchemes = normalizeCustomThemeSchemes(config.CustomThemeSchemes)
 	config.ThemeScheme = normalizeThemeSchemeWithCustom(config.ThemeScheme, config.CustomThemeSchemes)
 	if config.GridCols <= 0 {
@@ -7179,6 +7199,7 @@ func main() {
 	apiFormatTemplates = copyAPIFormatTemplates(userConfig.FormatTemplates)
 	magnifierEnabled = userConfig.ShowMagnifier
 	autoCopyRangeEnabled = userConfig.AutoCopyRange
+	imageDisplayModeValue = normalizeImageDisplayMode(userConfig.ImageDisplayMode)
 	gridModeEnabled = userConfig.GridMode
 	gridColsValue = userConfig.GridCols
 	gridRowsValue = userConfig.GridRows
@@ -7367,6 +7388,13 @@ func main() {
 			v.FitToView()
 		})
 	}
+	applyDefaultImageDisplayMode := func(v *ImageViewer) {
+		if normalizeImageDisplayMode(imageDisplayModeValue) == imageDisplayModeFitView {
+			fitImageToView(v)
+			return
+		}
+		v.ShowOriginalSize()
+	}
 	openNodeImageTab := func(img image.Image, onNodeClick func(x, y int)) *ImageViewer {
 		if img == nil {
 			return nil
@@ -7503,7 +7531,7 @@ func main() {
 
 				// 更新当前的imageViewer引用为新标签页的viewer
 				imageViewer = newImageViewer
-				fitImageToView(newImageViewer)
+				applyDefaultImageDisplayMode(newImageViewer)
 				w.Canvas().Focus(newImageViewer)
 
 				// 清空颜色点列表和矩形区域
@@ -7614,7 +7642,7 @@ func main() {
 
 				// 更新当前imageViewer引用
 				imageViewer = newImageViewer
-				fitImageToView(newImageViewer)
+				applyDefaultImageDisplayMode(newImageViewer)
 				w.Canvas().Focus(newImageViewer)
 
 				// 清空颜色点列表和矩形区域
@@ -7851,7 +7879,7 @@ func main() {
 
 		// 更新当前的imageViewer引用为新标签页的viewer
 		imageViewer = newImageViewer
-		fitImageToView(newImageViewer)
+		applyDefaultImageDisplayMode(newImageViewer)
 		w.Canvas().Focus(newImageViewer)
 
 		// 清空颜色点列表和矩形区域
@@ -8083,6 +8111,8 @@ func main() {
 		}
 		logPathLabel := widget.NewLabel(logPathText)
 		logPathLabel.Wrapping = fyne.TextWrapWord
+		defaultOriginalSizeCheck := widget.NewCheck("截图/载入后显示原始尺寸", nil)
+		defaultOriginalSizeCheck.SetChecked(normalizeImageDisplayMode(imageDisplayModeValue) == imageDisplayModeOriginal)
 		themeModeSelect := widget.NewSelect(appThemeModeOptions, nil)
 		themeModeSelect.SetSelected(themeModeDisplay(themeModeValue))
 		customSchemesDraft := copyCustomThemeSchemes(customThemeSchemesValue)
@@ -8376,6 +8406,9 @@ func main() {
 			widget.NewLabelWithStyle("系统配置", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			widget.NewLabel("配置应用级行为。保存后立即生效。"),
 			widget.NewSeparator(),
+			widget.NewLabelWithStyle("显示行为", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			defaultOriginalSizeCheck,
+			widget.NewSeparator(),
 			widget.NewLabelWithStyle("日志功能", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			logEnabledCheck,
 			logPathLabel,
@@ -8554,6 +8587,11 @@ func main() {
 			gridRowsValue = rows
 			gridSpacingValue = spacing
 			shortcutConfig = normalizeShortcutConfig(newShortcuts)
+			if defaultOriginalSizeCheck.Checked {
+				imageDisplayModeValue = imageDisplayModeOriginal
+			} else {
+				imageDisplayModeValue = imageDisplayModeFitView
+			}
 			setAppLoggingEnabled(logEnabledCheck.Checked)
 			applyThemeSettings(themeModeFromDisplay(themeModeSelect.Selected), selectedThemeSchemeID, customSchemesDraft)
 			registerConfiguredShortcuts()
@@ -9215,22 +9253,23 @@ func main() {
 			rightPanelSplitOffset = normalizeSplitOffset(centerRightSplit.Offset)
 		}
 		saveUserConfigSilently(UserConfig{
-			Precision:     strings.TrimSpace(precisionEntry.Text),
-			UniformOffset: strings.TrimSpace(uniformOffsetEntry.Text),
-			PickCount:     strings.TrimSpace(pickCountEntry.Text),
-			PickMode:      pickModeSelect.Selected,
-			FunctionMode:  functionSelect.Selected,
-			DirectionMode: directionSelect.Selected,
-			LogEnabled:    appLoggingEnabled,
-			ThemeMode:     themeModeValue,
-			ThemeScheme:   themeSchemeValue,
-			ShowMagnifier: showMagnifierCheck.Checked,
-			AutoCopyRange: autoCopyRangeCheck.Checked,
-			ApplyRange:    applyRangeCheck.Checked,
-			GridMode:      gridModeEnabled,
-			GridCols:      gridColsValue,
-			GridRows:      gridRowsValue,
-			GridSpacing:   gridSpacingValue,
+			Precision:        strings.TrimSpace(precisionEntry.Text),
+			UniformOffset:    strings.TrimSpace(uniformOffsetEntry.Text),
+			PickCount:        strings.TrimSpace(pickCountEntry.Text),
+			PickMode:         pickModeSelect.Selected,
+			FunctionMode:     functionSelect.Selected,
+			DirectionMode:    directionSelect.Selected,
+			LogEnabled:       appLoggingEnabled,
+			ThemeMode:        themeModeValue,
+			ThemeScheme:      themeSchemeValue,
+			ShowMagnifier:    showMagnifierCheck.Checked,
+			AutoCopyRange:    autoCopyRangeCheck.Checked,
+			ApplyRange:       applyRangeCheck.Checked,
+			ImageDisplayMode: imageDisplayModeValue,
+			GridMode:         gridModeEnabled,
+			GridCols:         gridColsValue,
+			GridRows:         gridRowsValue,
+			GridSpacing:      gridSpacingValue,
 
 			RightPanelSplitOffset: rightPanelSplitOffset,
 			SaveImagePaths:        normalizeSaveImagePaths(saveImagePaths),
@@ -9398,7 +9437,7 @@ func main() {
 
 					// 更新当前imageViewer引用
 					imageViewer = newImageViewer
-					fitImageToView(newImageViewer)
+					applyDefaultImageDisplayMode(newImageViewer)
 					w.Canvas().Focus(newImageViewer)
 
 					// 清空颜色点列表和矩形区域
