@@ -7014,6 +7014,7 @@ func main() {
 
 	// 创建应用 - 默认使用系统主题
 	a := app.New()
+	a.SetIcon(appIconResource)
 
 	// 检测系统当前主题并更新isDarkTheme变量
 	currentTheme := a.Settings().ThemeVariant()
