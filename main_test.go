@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math/rand"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -82,6 +83,30 @@ func TestNormalizeUserConfigDefaultsThemeScheme(t *testing.T) {
 	config := normalizeUserConfig(UserConfig{})
 	if config.ThemeScheme != appThemeSchemeClassicBlue {
 		t.Fatalf("theme scheme mismatch: want %q got %q", appThemeSchemeClassicBlue, config.ThemeScheme)
+	}
+}
+
+func TestNormalizeSaveImagePaths(t *testing.T) {
+	got := normalizeSaveImagePaths([]string{
+		"  C:/tmp/images  ",
+		"",
+		"C:/tmp/images",
+		"D:/screens",
+		".",
+	})
+	assertStringSliceEqual(t, got, []string{"C:\\tmp\\images", "D:\\screens"})
+}
+
+func TestRememberSaveImagePathMovesLatestToFront(t *testing.T) {
+	got := rememberSaveImagePath([]string{"C:/old", "D:/screens"}, "D:/screens")
+	assertStringSliceEqual(t, got, []string{"D:\\screens", "C:\\old"})
+}
+
+func TestImageSaveBaseNameSanitizesTabTitle(t *testing.T) {
+	now := time.Date(2026, 6, 6, 12, 34, 56, 0, time.Local)
+	got := imageSaveBaseName(`15:04:05?.jpg`, now)
+	if got != "15_04_05_20260606_123456.png" {
+		t.Fatalf("save file name mismatch: %q", got)
 	}
 }
 
@@ -415,6 +440,9 @@ func TestNormalizeShortcutConfigPreservesBlankOverrides(t *testing.T) {
 	}
 	if got[shortcutActionImport] != defaultShortcutTexts[shortcutActionImport] {
 		t.Fatalf("missing shortcut should use default, got %q", got[shortcutActionImport])
+	}
+	if got[shortcutActionSaveImage] != "Ctrl+S" {
+		t.Fatalf("save image default shortcut mismatch: %q", got[shortcutActionSaveImage])
 	}
 }
 

@@ -70,6 +70,7 @@ type UserConfig struct {
 	GridSpacing   int    `json:"grid_spacing"`
 
 	RightPanelSplitOffset float64                   `json:"right_panel_split_offset"`
+	SaveImagePaths        []string                  `json:"save_image_paths"`
 	CustomThemeSchemes    []CustomThemeSchemeConfig `json:"custom_theme_schemes"`
 	FormatTemplates       map[string]string         `json:"format_templates"`
 	Shortcuts             map[string]string         `json:"shortcuts"`
@@ -178,6 +179,11 @@ const (
 )
 
 const (
+	saveImagePathHistoryLimit = 10
+	saveImageChooseNewPath    = "选择新的保存路径..."
+)
+
+const (
 	aboutCurrentVersion = "1.0.0"
 	aboutLatestVersion  = "1.0.0"
 	aboutContactEmail   = "tp9527@qq.com"
@@ -190,6 +196,7 @@ const (
 const (
 	shortcutActionScreenshot = "screenshot"
 	shortcutActionImport     = "import_image"
+	shortcutActionSaveImage  = "save_image"
 	shortcutActionRange      = "range_select"
 	shortcutActionAutoPick   = "auto_pick"
 	shortcutActionClearAll   = "clear_all"
@@ -233,6 +240,7 @@ const (
 var defaultShortcutTexts = map[string]string{
 	shortcutActionScreenshot: "Ctrl+Z",
 	shortcutActionImport:     "Ctrl+L",
+	shortcutActionSaveImage:  "Ctrl+S",
 	shortcutActionRange:      "Ctrl+R",
 	shortcutActionAutoPick:   "Ctrl+A",
 	shortcutActionClearAll:   "Ctrl+E",
@@ -283,6 +291,7 @@ type commandDefinition struct {
 var commandDefinitions = []commandDefinition{
 	{ID: shortcutActionScreenshot, Label: "截图", Category: "图像", DefaultToolbar: false},
 	{ID: shortcutActionImport, Label: "加载图片", Category: "图像", DefaultToolbar: false},
+	{ID: shortcutActionSaveImage, Label: "保存到本地", Category: "图像", DefaultToolbar: false},
 	{ID: shortcutActionRange, Label: "范围框选", Category: "图像", DefaultToolbar: false},
 	{ID: shortcutActionAutoPick, Label: "自动取色", Category: "图像", DefaultToolbar: false},
 	{ID: shortcutActionClearAll, Label: "清除所有", Category: "取色点", DefaultToolbar: true},
@@ -922,6 +931,47 @@ func normalizeShortcutConfig(shortcuts map[string]string) map[string]string {
 	return normalized
 }
 
+func normalizeSaveImagePaths(paths []string) []string {
+	normalized := make([]string, 0, min(len(paths), saveImagePathHistoryLimit))
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		cleaned := filepath.Clean(strings.TrimSpace(path))
+		if cleaned == "." || cleaned == "" || seen[cleaned] {
+			continue
+		}
+		normalized = append(normalized, cleaned)
+		seen[cleaned] = true
+		if len(normalized) >= saveImagePathHistoryLimit {
+			break
+		}
+	}
+	return normalized
+}
+
+func rememberSaveImagePath(paths []string, path string) []string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if cleaned == "." || cleaned == "" {
+		return normalizeSaveImagePaths(paths)
+	}
+	next := make([]string, 0, min(len(paths)+1, saveImagePathHistoryLimit))
+	next = append(next, cleaned)
+	for _, existing := range paths {
+		if filepath.Clean(strings.TrimSpace(existing)) == cleaned {
+			continue
+		}
+		next = append(next, existing)
+	}
+	return normalizeSaveImagePaths(next)
+}
+
+func saveImagePathOptions(paths []string) []string {
+	normalized := normalizeSaveImagePaths(paths)
+	options := make([]string, 0, len(normalized)+1)
+	options = append(options, saveImageChooseNewPath)
+	options = append(options, normalized...)
+	return options
+}
+
 func shortcutText(shortcuts map[string]string, id string) string {
 	if value, ok := shortcuts[id]; ok {
 		return strings.TrimSpace(value)
@@ -1487,6 +1537,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 		config.GridSpacing = defaults.GridSpacing
 	}
 	config.RightPanelSplitOffset = normalizeSplitOffset(config.RightPanelSplitOffset)
+	config.SaveImagePaths = normalizeSaveImagePaths(config.SaveImagePaths)
 	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	config.Shortcuts = normalizeShortcutConfig(config.Shortcuts)
 	config.ToolButtons = normalizeToolButtonConfigs(config.ToolButtons)
@@ -1530,6 +1581,53 @@ func saveUserConfigSilently(config UserConfig) {
 	if err := saveUserConfig(config); err != nil {
 		log.Printf("保存配置失败: %v", err)
 	}
+}
+
+func imageSaveBaseName(tabTitle string, now time.Time) string {
+	name := strings.TrimSpace(tabTitle)
+	if name == "" {
+		name = "screenshot"
+	}
+	name = filepath.Base(name)
+	if ext := filepath.Ext(name); ext != "" {
+		name = strings.TrimSuffix(name, ext)
+	}
+
+	var builder strings.Builder
+	for _, r := range name {
+		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			builder.WriteRune('_')
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	name = strings.Trim(strings.TrimSpace(builder.String()), "._- ")
+	if name == "" {
+		name = "screenshot"
+	}
+	return fmt.Sprintf("%s_%s.png", name, now.Format("20060102_150405"))
+}
+
+func saveImageToFile(img image.Image, filePath string) error {
+	if img == nil {
+		return fmt.Errorf("没有可保存的图像")
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext == "" {
+		filePath += ".png"
+		ext = ".png"
+	}
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("创建文件失败: %w", err)
+	}
+	defer file.Close()
+
+	if ext == ".jpg" || ext == ".jpeg" {
+		return jpeg.Encode(file, img, &jpeg.Options{Quality: 100})
+	}
+	return png.Encode(file, img)
 }
 
 func newClickableTableRow(bg color.Color, content *fyne.Container, onTapped func()) *ClickableTableRow {
@@ -7085,6 +7183,11 @@ func main() {
 	gridColsValue = userConfig.GridCols
 	gridRowsValue = userConfig.GridRows
 	gridSpacingValue = userConfig.GridSpacing
+	saveImagePaths := normalizeSaveImagePaths(userConfig.SaveImagePaths)
+	selectedSaveImagePath := ""
+	if len(saveImagePaths) > 0 {
+		selectedSaveImagePath = saveImagePaths[0]
+	}
 
 	// 创建标签页容器（使用修改后的DocTabs，无滚动条但支持关闭功能）
 	tabs := container.NewDocTabs()
@@ -7533,7 +7636,69 @@ func main() {
 	importBtn := widget.NewButtonWithIcon("载入", theme.FolderOpenIcon(), importImage)
 	importBtn.Importance = widget.MediumImportance
 
-	saveBtn := widget.NewButtonWithIcon("保存", theme.DocumentSaveIcon(), func() {
+	var savePathSelect *widget.Select
+	updatingSavePathSelect := false
+	refreshSavePathSelect := func() {
+		if savePathSelect == nil {
+			return
+		}
+		updatingSavePathSelect = true
+		defer func() { updatingSavePathSelect = false }()
+
+		savePathSelect.SetOptions(saveImagePathOptions(saveImagePaths))
+		if selectedSaveImagePath != "" {
+			savePathSelect.SetSelected(selectedSaveImagePath)
+		} else {
+			savePathSelect.SetSelected(saveImageChooseNewPath)
+		}
+		savePathSelect.Refresh()
+	}
+	rememberSelectedSavePath := func(path string) {
+		saveImagePaths = rememberSaveImagePath(saveImagePaths, path)
+		if len(saveImagePaths) > 0 {
+			selectedSaveImagePath = saveImagePaths[0]
+		}
+		refreshSavePathSelect()
+		if saveCurrentConfig != nil {
+			saveCurrentConfig()
+		}
+	}
+	chooseSaveImageDirectory := func() {
+		startDir := selectedSaveImagePath
+		if startDir == "" && len(saveImagePaths) > 0 {
+			startDir = saveImagePaths[0]
+		}
+		go func() {
+			builder := nativedialog.Directory().Title("选择图片保存目录")
+			if startDir != "" {
+				builder.SetStartDir(startDir)
+			}
+			dirPath, err := builder.Browse()
+			if err != nil {
+				fyne.Do(refreshSavePathSelect)
+				return
+			}
+			fyne.Do(func() {
+				rememberSelectedSavePath(dirPath)
+			})
+		}()
+	}
+	savePathSelect = widget.NewSelect(saveImagePathOptions(saveImagePaths), func(value string) {
+		if updatingSavePathSelect {
+			return
+		}
+		if value == saveImageChooseNewPath {
+			chooseSaveImageDirectory()
+			return
+		}
+		selectedSaveImagePath = strings.TrimSpace(value)
+		if saveCurrentConfig != nil {
+			saveCurrentConfig()
+		}
+	})
+	refreshSavePathSelect()
+
+	saveCurrentImageToLocal := func() {
 		if imageViewer == nil || imageViewer.image == nil {
 			// 没有图像可保存
 			dialog.ShowInformation("提示", "当前没有可保存的图像", w)
@@ -7542,15 +7707,46 @@ func main() {
 
 		// 保存当前图像的引用，避免在 goroutine 中被修改
 		imgToSave := imageViewer.image
+		tabTitle := ""
+		if currentTab != nil {
+			tabTitle = currentTab.Text
+		}
+		fileName := imageSaveBaseName(tabTitle, time.Now())
+		targetDir := strings.TrimSpace(selectedSaveImagePath)
+		if targetDir != "" && targetDir != saveImageChooseNewPath {
+			go func() {
+				if err := os.MkdirAll(targetDir, 0755); err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(fmt.Errorf("创建保存目录失败: %v", err), w)
+					})
+					return
+				}
+				filePath := filepath.Join(targetDir, fileName)
+				if err := saveImageToFile(imgToSave, filePath); err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(fmt.Errorf("保存图像失败: %v", err), w)
+					})
+					return
+				}
+				fyne.Do(func() {
+					rememberSelectedSavePath(targetDir)
+					dialog.ShowInformation("保存成功", "图片已保存到："+filePath, w)
+				})
+			}()
+			return
+		}
 
 		// 使用系统原生文件保存对话框
 		go func() {
-			filePath, err := nativedialog.File().
+			builder := nativedialog.File().
 				Filter("PNG 图片", "png").
 				Filter("JPEG 图片", "jpg", "jpeg").
 				Title("保存图片").
-				SetStartFile("screenshot.png").
-				Save()
+				SetStartFile(fileName)
+			if len(saveImagePaths) > 0 {
+				builder.SetStartDir(saveImagePaths[0])
+			}
+			filePath, err := builder.Save()
 
 			if err != nil {
 				// 用户取消或发生错误
@@ -7566,31 +7762,20 @@ func main() {
 				ext = ".png"
 			}
 
-			// 创建文件
-			file, err := os.Create(filePath)
-			if err != nil {
-				fyne.Do(func() {
-					dialog.ShowError(fmt.Errorf("创建文件失败: %v", err), w)
-				})
-				return
-			}
-			defer file.Close()
-
-			// 根据扩展名编码图像
-			if ext == ".jpg" || ext == ".jpeg" {
-				err = jpeg.Encode(file, imgToSave, &jpeg.Options{Quality: 100})
-			} else {
-				err = png.Encode(file, imgToSave)
-			}
-
-			if err != nil {
+			if err := saveImageToFile(imgToSave, filePath); err != nil {
 				fyne.Do(func() {
 					dialog.ShowError(fmt.Errorf("保存图像失败: %v", err), w)
 				})
 				return
 			}
+
+			fyne.Do(func() {
+				rememberSelectedSavePath(filepath.Dir(filePath))
+				dialog.ShowInformation("保存成功", "图片已保存到："+filePath, w)
+			})
 		}()
-	})
+	}
+	saveBtn := widget.NewButtonWithIcon("保存到本地", theme.DocumentSaveIcon(), saveCurrentImageToLocal)
 	saveBtn.Importance = widget.MediumImportance
 
 	rotateBtn := widget.NewButtonWithIcon("旋转", theme.MediaReplayIcon(), func() {
@@ -7840,6 +8025,7 @@ func main() {
 	registerCommand(commandFontLibrary, openFontLibrary)
 	registerCommand(shortcutActionScreenshot, captureScreenshot)
 	registerCommand(shortcutActionImport, importImage)
+	registerCommand(shortcutActionSaveImage, saveCurrentImageToLocal)
 	registerCommand(commandCopyCode, generateCodeFunc)
 	applyThemeSettings := func(mode, scheme string, customSchemes []CustomThemeSchemeConfig) {
 		themeModeValue = normalizeThemeMode(mode)
@@ -8478,6 +8664,7 @@ func main() {
 
 	screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
 	importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
+	saveBtn.SetText(buttonTextWithShortcut("保存到本地", shortcutActionSaveImage))
 
 	rotateLeftBtn := widget.NewButtonWithIcon("", theme.ContentUndoIcon(), func() {
 		if imageViewer == nil || imageViewer.originalImage == nil {
@@ -8668,6 +8855,8 @@ func main() {
 		screenshotBtn,
 		rotateRow,
 		importBtn,
+		saveBtn,
+		savePathSelect,
 		rangeBtn,
 		cutBtn,
 		coordDisplayEntry,
@@ -8916,6 +9105,7 @@ func main() {
 	refreshShortcutButtonTexts = func() {
 		screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
 		importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
+		saveBtn.SetText(buttonTextWithShortcut("保存到本地", shortcutActionSaveImage))
 		updateRangeButton()
 		autoPickBtn.SetText(buttonTextWithShortcut("自动取色", shortcutActionAutoPick))
 		clearAllBtn.SetText("清空")
@@ -9043,6 +9233,7 @@ func main() {
 			GridSpacing:   gridSpacingValue,
 
 			RightPanelSplitOffset: rightPanelSplitOffset,
+			SaveImagePaths:        normalizeSaveImagePaths(saveImagePaths),
 			CustomThemeSchemes:    copyCustomThemeSchemes(customThemeSchemesValue),
 			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
 			Shortcuts:             copyShortcutConfig(shortcutConfig),
