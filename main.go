@@ -2687,6 +2687,7 @@ type ImageViewer struct {
 	onRightClick       func(x, y int)
 	onRangeModeChanged func(enabled bool)
 	onRangeSelected    func(rect image.Rectangle)
+	onCropSelected     func(rect image.Rectangle)
 	onActivated        func()
 	getGridParams      func() (cols, rows, spacing int, hasParams bool) // 获取点阵参数的回调
 	scrollContainer    *container.Scroll                                // 滚动容器引用
@@ -5258,6 +5259,21 @@ func (v *ImageViewer) TappedSecondary(e *fyne.PointEvent) {
 	addMenuButton("清除所有选点", true, func() {
 		v.ClearMarks()
 	})
+	addMenuButton("裁剪当前选区", len(v.markRects) > 0 && v.onCropSelected != nil, func() {
+		if len(v.markRects) == 0 || v.onCropSelected == nil {
+			return
+		}
+		rect := v.markRects[len(v.markRects)-1]
+		cropRect := normalizePickRect(v.image, image.Rect(
+			min(rect.X1, rect.X2),
+			min(rect.Y1, rect.Y2),
+			max(rect.X1, rect.X2),
+			max(rect.Y1, rect.Y2),
+		))
+		if !cropRect.Empty() {
+			v.onCropSelected(cropRect)
+		}
+	})
 	menuContent.Add(widget.NewSeparator())
 
 	for i := 0; i < maxRightMenuPoints; i++ {
@@ -6919,12 +6935,18 @@ func main() {
 		}
 		return 0, 0, 0, false
 	}
+	var cropImageToNewTab func(*ImageViewer, image.Rectangle)
 	configureImageViewer := func(v *ImageViewer) {
 		v.window = w
 		v.getGridParams = getGridParamsFunc
 		v.onRangeModeChanged = func(bool) {
 			if updateRangeButton != nil {
 				updateRangeButton()
+			}
+		}
+		v.onCropSelected = func(rect image.Rectangle) {
+			if cropImageToNewTab != nil {
+				cropImageToNewTab(v, rect)
 			}
 		}
 	}
@@ -7276,55 +7298,20 @@ func main() {
 	})
 	rotateBtn.Importance = widget.MediumImportance
 
-	// 底部额外按钮
-	cutBtn := widget.NewButtonWithIcon("裁剪", theme.ContentCutIcon(), func() {
-		// 检查是否有图像
-		if imageViewer == nil || imageViewer.image == nil {
+	// 裁剪结果始终在新标签页中打开，保留原始截图标签页。
+	cropImageToNewTab = func(sourceViewer *ImageViewer, cropRect image.Rectangle) {
+		if sourceViewer == nil || sourceViewer.image == nil {
 			dialog.ShowInformation("提示", "当前没有可裁剪的图像", w)
 			return
 		}
 
-		// 检查是否有选择矩形区域
-		if len(imageViewer.markRects) == 0 {
-			dialog.ShowInformation("提示", "请先使用鼠标在图像上拖动选择要裁剪的区域", w)
-			return
-		}
-
-		// 获取选择区域的坐标
-		rect := imageViewer.markRects[0]
-
-		// 确保坐标是左上角到右下角的顺序
-		minX := min(rect.X1, rect.X2)
-		minY := min(rect.Y1, rect.Y2)
-		maxX := max(rect.X1, rect.X2)
-		maxY := max(rect.Y1, rect.Y2)
-
-		// 确保裁剪区域在图像范围内
-		bounds := imageViewer.image.Bounds()
-		if minX < bounds.Min.X {
-			minX = bounds.Min.X
-		}
-		if minY < bounds.Min.Y {
-			minY = bounds.Min.Y
-		}
-		if maxX > bounds.Max.X {
-			maxX = bounds.Max.X
-		}
-		if maxY > bounds.Max.Y {
-			maxY = bounds.Max.Y
-		}
-
-		// 检查裁剪区域是否有效
-		if minX >= maxX || minY >= maxY {
+		cropRect = normalizePickRect(sourceViewer.image, cropRect)
+		if cropRect.Empty() {
 			dialog.ShowInformation("提示", "选择的裁剪区域无效", w)
 			return
 		}
 
-		// 创建裁剪区域
-		cropRect := image.Rect(minX, minY, maxX, maxY)
-
-		// 裁剪图像
-		croppedImg := cropImage(imageViewer.image, cropRect)
+		croppedImg := cropImage(sourceViewer.image, cropRect)
 
 		// 保存当前标签页的数据
 		saveCurrentTabData()
@@ -7387,6 +7374,17 @@ func main() {
 		if refreshColorList != nil {
 			refreshColorList()
 		}
+	}
+
+	cutBtn := widget.NewButtonWithIcon("裁剪", theme.ContentCutIcon(), func() {
+		if imageViewer == nil || imageViewer.image == nil {
+			dialog.ShowInformation("提示", "请先截图或加载图片后再裁剪", w)
+			return
+		}
+		sourceViewer := imageViewer
+		sourceViewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+			cropImageToNewTab(sourceViewer, rect)
+		})
 	})
 	cutBtn.Importance = widget.MediumImportance
 
@@ -8368,6 +8366,7 @@ func main() {
 		rotateRow,
 		importBtn,
 		rangeBtn,
+		cutBtn,
 		coordDisplayEntry,
 		copyResetRow,
 		resetZoomBtn,

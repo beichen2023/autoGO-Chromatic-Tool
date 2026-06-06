@@ -967,6 +967,23 @@ func TestAutoPickRangeCallbackDoesNotOverwriteRangeSelection(t *testing.T) {
 	}
 }
 
+func TestCropImageCopiesSelectedRegionToNewOrigin(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	src.SetNRGBA(2, 1, color.NRGBA{R: 10, G: 20, B: 30, A: 255})
+	src.SetNRGBA(4, 3, color.NRGBA{R: 40, G: 50, B: 60, A: 255})
+
+	cropped := cropImage(src, image.Rect(2, 1, 5, 4))
+	if cropped.Bounds() != image.Rect(0, 0, 3, 3) {
+		t.Fatalf("cropped bounds mismatch: got %v", cropped.Bounds())
+	}
+	if got := color.NRGBAModel.Convert(cropped.At(0, 0)).(color.NRGBA); got != (color.NRGBA{R: 10, G: 20, B: 30, A: 255}) {
+		t.Fatalf("cropped first pixel mismatch: got %+v", got)
+	}
+	if got := color.NRGBAModel.Convert(cropped.At(2, 2)).(color.NRGBA); got != (color.NRGBA{R: 40, G: 50, B: 60, A: 255}) {
+		t.Fatalf("cropped last pixel mismatch: got %+v", got)
+	}
+}
+
 func TestSplitOffsetForFixedRightWidth(t *testing.T) {
 	got := splitOffsetForFixedRightWidth(1000, 190, 340)
 	want := float64(470) / float64(810)
