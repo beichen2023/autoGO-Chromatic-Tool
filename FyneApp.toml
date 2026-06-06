@@ -1,6 +1,6 @@
 [Details]
   Icon = "build/logo.png"
-  Name = "AutoGo图色助手"
+  Name = "AutoGo图色助手-v2.0.2"
   ID = "com.autogo.imagetool"
-  Version = "1.0.4"
-  Build = 43
+  Version = "2.0.2"
+  Build = 202

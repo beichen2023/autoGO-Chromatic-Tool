@@ -59,7 +59,7 @@ Windows PowerShell：
 powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
 ```
 
-默认生成 `build\AutoGo图色助手.exe`。完整环境准备、运行和手动打包命令见
+默认生成 `build\AutoGo图色助手-v2.0.2.exe`。完整环境准备、运行和手动打包命令见
 [运行与 Windows 打包说明](docs/运行与Windows打包说明.md)。
 
 ## 测试

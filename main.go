@@ -193,8 +193,12 @@ const (
 )
 
 const (
-	aboutCurrentVersion = "1.0.0"
-	aboutLatestVersion  = "1.0.0"
+	appBaseName    = "AutoGo图色助手"
+	appVersion     = "2.0.2"
+	appReleaseName = appBaseName + "-v" + appVersion
+
+	aboutCurrentVersion = appVersion
+	aboutLatestVersion  = appVersion
 	aboutContactEmail   = "tp9527@qq.com"
 	aboutProjectURL     = "https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git"
 	aboutReleaseNotes   = `暂无版本更新日志。
@@ -1520,7 +1524,7 @@ func userConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "AutoGo图色助手", "config.json"), nil
+	return filepath.Join(configDir, appBaseName, "config.json"), nil
 }
 
 func normalizeUserConfig(config UserConfig) UserConfig {
@@ -7194,7 +7198,7 @@ func main() {
 	}()
 
 	// 创建窗口
-	w := a.NewWindow("AutoGo图色助手")
+	w := a.NewWindow(appReleaseName)
 	mainWindowSize := initialWindowSize(0.70, 0.70)
 	apiFormatTemplates = copyAPIFormatTemplates(userConfig.FormatTemplates)
 	magnifierEnabled = userConfig.ShowMagnifier

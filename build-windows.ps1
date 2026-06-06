@@ -1,8 +1,15 @@
 ﻿param(
-    [string]$Output = "build/AutoGo图色助手.exe"
+    [string]$Version = "2.0.2",
+    [string]$Output = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+$AppBaseName = "AutoGo图色助手"
+$AppName = "$AppBaseName-v$Version"
+if ([string]::IsNullOrWhiteSpace($Output)) {
+    $Output = "build/$AppName.exe"
+}
 
 function Resolve-Gcc {
     $command = Get-Command gcc -ErrorAction SilentlyContinue

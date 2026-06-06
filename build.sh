@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # 配置参数
-APP_NAME="AutoGo图色助手"
+APP_BASE_NAME="AutoGo图色助手"
 ICON_PATH="./build/logo.png"
 ICON_ICNS="./build/logo.icns"
 BUILD_DIR="./build"
-VERSION="1.0.5"
-BUILD_NUMBER="5"
+VERSION="2.0.2"
+BUILD_NUMBER="202"
+APP_NAME="${APP_BASE_NAME}-v${VERSION}"
 
 echo "开始打包 macOS 应用..."
 echo ""
